@@ -1,0 +1,26 @@
+[
+  {
+    "OUTPUT_ID": "T4_LEATHER",
+    "OUTPUT_QTY": 1,
+    "INPUT_ID": "T4_HIDE",
+    "INPUT_QTY": 2,
+    "STATION": "refining",
+    "FOCUS_BASED": 0
+  },
+  {
+    "OUTPUT_ID": "T4_MEAL_OMELETTE",
+    "OUTPUT_QTY": 1,
+    "INPUT_ID": "T4_EGGS",
+    "INPUT_QTY": 1,
+    "STATION": "cooking",
+    "FOCUS_BASED": 0
+  },
+  {
+    "OUTPUT_ID": "T4_MEAL_OMELETTE",
+    "OUTPUT_QTY": 1,
+    "INPUT_ID": "T4_CORN",
+    "INPUT_QTY": 1,
+    "STATION": "cooking",
+    "FOCUS_BASED": 0
+  }
+]
