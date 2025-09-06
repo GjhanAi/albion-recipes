@@ -9,7 +9,8 @@ const OUT_JSON = path.join(OUT_DIR, 'recipes.json');
 const OUT_FLAT_JSON = path.join(OUT_DIR, 'recipes.flat.json');
 const OUT_FLAT_CSV = path.join(OUT_DIR, 'recipes.flat.csv');
 
-const SRC_URL = 'https://api.github.com/repos/ao-data/ao-bin-dumps/contents/formatted/recipes.json?ref=master';
+const SRC_URL = 'https://api.github.com/repos/broderickhyman/ao-bin-dumps/contents/formatted/recipes.json?ref=master';
+const SRC_URL_FALLBACK = 'https://raw.githubusercontent.com/broderickhyman/ao-bin-dumps/master/formatted/recipes.json';
 const TOKEN = process.env.GITHUB_TOKEN || '';
 
 function httpGet(url, headers = {}){
