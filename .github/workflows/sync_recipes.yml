@@ -1,0 +1,41 @@
+name: Sync Albion recipes
+
+on:
+  workflow_dispatch: {}          # botón "Run workflow"
+  schedule:
+    - cron: "0 */12 * * *"       # cada 12 h (opcional)
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write            # para poder commitear
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 18
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+
+      - name: Fetch & build flat recipes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # token automático del runner
+        run: |
+          node -v
+          mkdir -p formatted data
+          node scripts/fetch_recipes.js
+          # Si tu script genera "recipes.json" y "recipes.flat.json" en la raíz:
+          if [ -f recipes.json ]; then mv recipes.json data/recipes.json; fi
+          if [ -f recipes.flat.json ]; then mv recipes.flat.json formatted/recipes.json; fi
+          # Verifica
+          ls -R
+
+      - name: Commit & push
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore: sync recipes" || echo "No changes to commit"
+          git push
