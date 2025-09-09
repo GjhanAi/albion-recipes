@@ -34,3 +34,35 @@ jobs:
             formatted/recipes.json
             data/recipes.json
           message: 'chore: sync recipes.json from ao-data'
+name: Sync Albion recipes
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * *'   # opcional: diario 06:00 UTC
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download recipes.json (ao-data)
+        run: |
+          set -euo pipefail
+          mkdir -p formatted data
+          curl -fL \
+            -H "User-Agent: AlbionCalc" \
+            https://raw.githubusercontent.com/ao-data/ao-bin-dumps/master/formatted/recipes.json \
+            -o formatted/recipes.json
+          # copia espejo en /data también (por si luego quieres usar esa ruta)
+          cp formatted/recipes.json data/recipes.json
+          # validación básica: debe ser array grande (miles)
+          node -e 'const fs=require("fs");const j=JSON.parse(fs.readFileSync("formatted/recipes.json","utf8"));if(!Array.isArray(j)||j.length<1000){console.error("Muy pocas recetas:", Array.isArray(j)?j.length:"no array");process.exit(2);}console.log("OK recetas:", j.length);'
+
+      - name: Commit if changed
+        uses: EndBug/add-and-commit@v9
+        with:
+          add: |
+            formatted/recipes.json
+            data/recipes.json
+          message: 'chore: sync recipes.json from ao-data'
