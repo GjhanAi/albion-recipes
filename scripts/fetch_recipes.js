@@ -215,3 +215,90 @@ async function main(){
 }
 
 main().catch(err => { console.error('ERROR:', err.message); process.exit(1); });
+// scripts/fetch_recipes.js
+// Baja el recipes.json completo y además construye un recipes.flat.json compacto.
+
+const fs = require('fs');
+const path = require('path');
+const https = require('https');
+
+const CANDIDATES = [
+  // RAW directo (sin límite CDN de 50 MB)
+  'https://raw.githubusercontent.com/ao-data/ao-bin-dumps/master/formatted/recipes.json',
+  'https://github.com/ao-data/ao-bin-dumps/raw/master/formatted/recipes.json',
+];
+
+function download(url, dest) {
+  return new Promise((resolve, reject) => {
+    const file = fs.createWriteStream(dest);
+    const opts = { headers: { 'User-Agent': 'AlbionRecipesSync/1.0' } };
+
+    const doReq = (u) => https.get(u, opts, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        // redirección
+        file.close(); fs.unlinkSync(dest);
+        return doReq(res.headers.location);
+      }
+      if (res.statusCode !== 200) {
+        file.close(); fs.unlinkSync(dest);
+        return reject(new Error(`HTTP ${res.statusCode}`));
+      }
+      res.pipe(file);
+      file.on('finish', () => file.close(resolve));
+    }).on('error', (err) => {
+      try { file.close(); fs.unlinkSync(dest); } catch (_) {}
+      reject(err);
+    });
+    doReq(url);
+  });
+}
+
+(async () => {
+  fs.mkdirSync('data', { recursive: true });
+  const out = path.join('data', 'recipes.json');
+
+  let ok = false, lastErr = null;
+  for (const u of CANDIDATES) {
+    try {
+      console.log('Descargando:', u);
+      await download(u, out);
+      const size = fs.statSync(out).size;
+      if (size < 2_000_000) throw new Error(`archivo demasiado pequeño (${size} bytes)`);
+      console.log('OK:', u, 'bytes=', size);
+      ok = true;
+      break;
+    } catch (e) {
+      console.error('Fallo:', u, e.message);
+      lastErr = e;
+    }
+  }
+  if (!ok) throw lastErr || new Error('No se pudo descargar recipes.json');
+
+  // Construir una versión "plana" más ligera para Apps Script
+  try {
+    console.log('Construyendo recipes.flat.json …');
+    const raw = JSON.parse(fs.readFileSync(out, 'utf8'));
+    const flat = [];
+    for (const r of raw) {
+      const outId  = r.OutputObject || r.OutputItem || r.OutputItemId || r.output || '';
+      const outQty = r.OutputAmount || r.OutputQuantity || r.OutputQty || r.quantity || 1;
+      const cat    = r.CraftingCategory || r.Station || r.station || 'unknown';
+      const ings   = r.Ingredients || r.ingredients || r.EntryRequirements || [];
+      if (!outId || !Array.isArray(ings) || !ings.length) continue;
+
+      flat.push({
+        OutputItemId: outId,
+        OutputAmount: outQty,
+        CraftingCategory: cat,
+        Ingredients: ings.map(ing => ({
+          ItemId:  ing.Object || ing.Item || ing.ItemId || ing.item || '',
+          Amount:  ing.Count  || ing.Amount || ing.count  || ing.amount || 1,
+        })).filter(x => x.ItemId),
+      });
+    }
+    fs.writeFileSync(path.join('data', 'recipes.flat.json'), JSON.stringify(flat));
+    console.log('recipes.flat.json filas =', flat.length);
+  } catch (e) {
+    console.error('Error creando flat:', e.message);
+  }
+})();
