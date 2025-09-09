@@ -1,38 +1,106 @@
-name: Sync Albion recipes
+// scripts/fetch_recipes.js
+const https = require("https");
+const fs = require("fs");
 
-on:
-  workflow_dispatch:      # lo podrás lanzar a mano desde Actions
-  # schedule:
-  #   - cron: '0 9 * * *' # (opcional) corre todos los días 09:00 UTC
+const SOURCES = [
+  // 1) RAW oficial
+  "https://raw.githubusercontent.com/ao-data/ao-bin-dumps/master/formatted/recipes.json",
+  // 2) API GitHub (fallback, decodificamos base64)
+  "https://api.github.com/repos/ao-data/ao-bin-dumps/contents/formatted/recipes.json?ref=master"
+];
 
-permissions:
-  contents: write         # necesario para poder commitear los archivos generados
+const GITHUB_TOKEN = process.env.GITHUB_TOKEN || "";
 
-jobs:
-  sync:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+function httpGet(url, extraHeaders = {}) {
+  const headers = Object.assign(
+    {
+      "User-Agent": "albion-recipes-sync",
+      "Accept": url.includes("api.github.com")
+        ? "application/vnd.github+json"
+        : "application/json"
+    },
+    extraHeaders
+  );
+  return new Promise((resolve, reject) => {
+    https
+      .get(url, { headers }, (res) => {
+        const { statusCode, headers: resHeaders } = res;
+        let data = "";
+        res.on("data", (chunk) => (data += chunk));
+        res.on("end", () => resolve({ status: statusCode, headers: resHeaders, body: data }));
+      })
+      .on("error", reject);
+  });
+}
 
-      - name: Setup Node 18
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
+async function downloadText() {
+  for (const url of SOURCES) {
+    try {
+      const headers = {};
+      if (GITHUB_TOKEN && url.includes("api.github.com")) {
+        headers["Authorization"] = `Bearer ${GITHUB_TOKEN}`;
+      }
+      let { status, headers: h, body } = await httpGet(url, headers);
 
-      - name: Fetch & build recipes
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # token automático del runner
-        run: |
-          node -v
-          mkdir -p data
-          node scripts/fetch_recipes.js
-          ls -lh data
+      // seguir una redirección si la hay (301/302)
+      if (status >= 300 && status < 400 && h.location) {
+        ({ status, headers: h, body } = await httpGet(h.location, headers));
+      }
+      if (status !== 200) {
+        console.log(`✗ ${url} -> HTTP ${status}`);
+        continue;
+      }
 
-      - name: Commit & push results
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "chore: sync recipes ($(date -u +%F@%H:%MZ))" || echo "No changes to commit"
-          git push
+      // API contents: decodificar base64
+      if (url.includes("api.github.com")) {
+        const obj = JSON.parse(body);
+        if (obj && obj.content && obj.encoding === "base64") {
+          body = Buffer.from(obj.content, "base64").toString("utf8");
+        } else if (Array.isArray(obj)) {
+          body = JSON.stringify(obj);
+        }
+      }
+
+      console.log(`✓ fetched from ${url}`);
+      return body;
+    } catch (e) {
+      console.log(`✗ ${url}: ${e.message}`);
+    }
+  }
+  throw new Error("All sources failed");
+}
+
+function flatten(recipes) {
+  const rows = [];
+  for (const r of recipes) {
+    const outId = r.OutputItemId || r.OutputItem || r.OutputObject || r.output;
+    const outQty = r.OutputAmount || r.OutputQuantity || r.OutputQty || r.quantity || 1;
+    const cat = r.CraftingCategory || r.Station || r.station || "";
+    const ings = r.Ingredients || r.ingredients || r.EntryRequirements || [];
+    if (!outId || !Array.isArray(ings)) continue;
+    for (const ing of ings) {
+      const inId = ing.ItemId || ing.Item || ing.Object || ing.item;
+      const inQty = ing.Amount || ing.Count || ing.amount || ing.count || 1;
+      if (inId) rows.push({ outId, outQty, cat, inId, inQty });
+    }
+  }
+  return rows;
+}
+
+(async () => {
+  const text = await downloadText();
+  const arr = JSON.parse(text);
+
+  fs.mkdirSync("data", { recursive: true });
+  fs.writeFileSync("data/recipes.json", JSON.stringify(arr, null, 2));
+
+  const flat = flatten(arr);
+  fs.writeFileSync("data/recipes.flat.json", JSON.stringify(flat, null, 2));
+
+  const header = "OutputItemId,OutputAmount,CraftingCategory,IngredId,IngredQty\n";
+  const csv =
+    header + flat.map(r => `${r.outId},${r.outQty},${r.cat},${r.inId},${r.inQty}`).join("\n");
+  fs.writeFileSync("data/recipes.flat.csv", csv);
+
+  console.log(`Saved ${arr.length} recipes; flat rows: ${flat.length}`);
+})();
